@@ -69,7 +69,7 @@ flowchart LR
 
 ## 2026 개선 (캡스톤 이후)
 캡스톤이 끝난 뒤 코드를 다시 점검해서, 버그를 고치고 발표 때 소개했지만 코드에는 미완성이던 기능을 완성했습니다.
-원본과 개선본을 커밋으로 나눠 두어서 [비교 화면](https://github.com/SEONGBINJEON/Ploggy/compare/3a7c048...0dc2c60)에서 바뀐 부분을 볼 수 있습니다.
+원본과 개선본을 커밋으로 나눠 두어서 [비교 화면](https://github.com/SEONGBINJEON/Ploggy/compare/2025-capstone...2026-improved)에서 바뀐 부분을 볼 수 있습니다.
 
 | 문제 | 원인 | 조치 |
 |---|---|---|
@@ -89,7 +89,8 @@ flowchart LR
 flutter pub get
 flutter run
 ```
-Google Maps 키, Firebase 보안 규칙, APK 빌드 방법은 [설치·실행 문서](docs/setup.md)에 정리했습니다.
+Firebase 프로젝트 설정 파일은 저장소에 넣지 않았기 때문에, 실행하려면 본인 Firebase 프로젝트를 연결해야 합니다.
+Firebase 연결, Google Maps 키, 보안 규칙, APK 빌드 방법은 [설치·실행 문서](docs/setup.md)에 정리했습니다.
 
 ## 문서
 - [발표자료 (PDF)](docs/presentation.pdf) — 팀원 개인정보와 외부 캠페인 포스터가 담긴 페이지는 뺐습니다.

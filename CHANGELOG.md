@@ -49,6 +49,7 @@
 - Google Maps API 키를 AndroidManifest에서 `android/local.properties`(깃 제외)로 이동
 - Firestore·Storage 보안 규칙 추가 (`firestore.rules`, `storage.rules`). README의 전체 공개 규칙 안내 삭제
 - `users` 문서는 본인만 읽도록 하고, 새로 저장하는 프로필에는 이메일을 넣지 않음
+- 공개 저장소에는 팀 Firebase 프로젝트 설정값(`google-services.json`, `firebase_options.dart`)을 넣지 않음. 연결 방법은 `docs/setup.md`
 - Firebase 초기화: Android는 google-services.json을 쓰도록 정리 (웹 설정으로 초기화하다 중복 오류가 나던 흐름 제거)
 - iOS 카메라·사진·위치 권한 문구와 Google Maps 초기화 코드 추가 (키가 임시 값이어도 지도 화면에서 앱이 종료되지 않도록)
 

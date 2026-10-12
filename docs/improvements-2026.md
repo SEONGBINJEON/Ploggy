@@ -1,7 +1,7 @@
 # 2026 개선 과정
 
 캡스톤(2025.09) 이후 코드를 다시 점검하면서 찾은 문제를 **현상 → 원인 → 조치 → 검증** 순서로 정리했습니다.
-원본(2025)과 개선본(2026)의 전체 차이는 [커밋 비교](https://github.com/SEONGBINJEON/Ploggy/compare/3a7c048...0dc2c60)에서 볼 수 있고, 항목별 목록은 [CHANGELOG](../CHANGELOG.md)에 있습니다.
+원본(2025)과 개선본(2026)의 전체 차이는 [커밋 비교](https://github.com/SEONGBINJEON/Ploggy/compare/2025-capstone...2026-improved)에서 볼 수 있고, 항목별 목록은 [CHANGELOG](../CHANGELOG.md)에 있습니다.
 
 ## 진행 방식
 1. **발표자료와 코드 대조**: 발표에서 소개한 기능이 코드에 실제로 있는지 하나씩 확인
