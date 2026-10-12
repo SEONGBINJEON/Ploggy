@@ -1,0 +1,14 @@
+{
+  "created_at": "2025-08-15 05:33:45",
+  "model_files": [
+    "plogging_224_fp16.tflite",
+    "plogging_224_dynamic.tflite",
+    "labels.txt",
+    "disposal_map.json"
+  ],
+  "recommended": "plogging_224_fp16.tflite",
+  "notes": [
+    "input float32 RGB 224x224, 0..255",
+    "output 6-way logits/softmax"
+  ]
+}

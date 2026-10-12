@@ -1,0 +1,8 @@
+{
+  "organics": "COMPOST",
+  "trash": "LANDFILL",
+  "glass": "RECYCLING",
+  "metal": "RECYCLING",
+  "paper": "RECYCLING",
+  "plastic": "RECYCLING"
+}
