@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>쓰레기 사진을 찍어 AI로 분류하기 위해 카메라를 사용합니다.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>앨범에 있는 쓰레기 사진을 분류하거나 글에 첨부하기 위해 사진 보관함에 접근합니다.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>조깅 경로를 기록하고 주변 쓰레기통 위치를 보여주기 위해 위치 정보를 사용합니다.</string>
+	<key>GMSApiKey</key>
+	<string>YOUR_IOS_MAPS_API_KEY</string>
 </dict>
 </plist>

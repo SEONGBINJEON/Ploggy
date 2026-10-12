@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/jog_record.dart';
+import 'weather_service.dart';
 
 class BadgeService extends ChangeNotifier {
   static const String _badgeBoxName = 'user_badges';
-  
+  static const String _statsBoxName = 'user_stats';
+  static const String _trashCountKey = 'trash_count';
+  static const String _postCountKey = 'post_count';
+
   // 뱃지 데이터
   static const List<Map<String, dynamic>> _badges = [
     {
@@ -121,21 +125,35 @@ class BadgeService extends ChangeNotifier {
     },
   ];
 
+  // 에코 마스터 조건이 되는 기본 뱃지
+  static const List<String> _basicBadges = [
+    'first_plogging', 'distance_5km', 'trash_10', 'morning_plogging',
+  ];
+
   // 획득한 뱃지 목록
   Set<String> _unlockedBadges = {};
 
   // 새로 획득한 뱃지 (팝업 표시용)
   String? _newlyUnlockedBadge;
 
+  bool _isInitialized = false;
+
   // Getters
   List<Map<String, dynamic>> get badges => _badges;
   Set<String> get unlockedBadges => _unlockedBadges;
   String? get newlyUnlockedBadge => _newlyUnlockedBadge;
 
-  // 뱃지 초기화
+  Box get _statsBox => Hive.box(_statsBoxName);
+  int get trashCount => _statsBox.get(_trashCountKey, defaultValue: 0) as int;
+  int get postCount => _statsBox.get(_postCountKey, defaultValue: 0) as int;
+
+  // 뱃지 초기화 (여러 번 불러도 한 번만 실행)
   Future<void> initialize() async {
+    if (_isInitialized) return;
     final box = await Hive.openBox<String>(_badgeBoxName);
+    await Hive.openBox(_statsBoxName);
     _unlockedBadges = box.values.toSet();
+    _isInitialized = true;
     notifyListeners();
   }
 
@@ -149,11 +167,11 @@ class BadgeService extends ChangeNotifier {
     if (!_unlockedBadges.contains(badgeId)) {
       _unlockedBadges.add(badgeId);
       _newlyUnlockedBadge = badgeId;
-      
+
       // Hive에 저장
       final box = await Hive.openBox<String>(_badgeBoxName);
       await box.put(badgeId, badgeId);
-      
+
       notifyListeners();
     }
   }
@@ -164,115 +182,100 @@ class BadgeService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 뱃지 획득 조건 체크
-  Future<List<String>> checkBadgeConditions() async {
+  /// 쓰레기 기록을 저장했을 때 호출합니다. 새로 얻은 뱃지 id를 돌려줍니다.
+  Future<List<String>> recordTrashCollected() async {
+    await initialize();
+    await _statsBox.put(_trashCountKey, trashCount + 1);
+    return checkBadgeConditions();
+  }
+
+  /// 커뮤니티에 글을 올렸을 때 호출합니다. 새로 얻은 뱃지 id를 돌려줍니다.
+  Future<List<String>> recordCommunityPost() async {
+    await initialize();
+    await _statsBox.put(_postCountKey, postCount + 1);
+    return checkBadgeConditions();
+  }
+
+  /// 뱃지 획득 조건 체크
+  ///
+  /// [weatherCode]는 조깅을 마친 시점의 WMO 날씨 코드입니다. (비/눈 뱃지용)
+  Future<List<String>> checkBadgeConditions({int? weatherCode}) async {
+    await initialize();
     final newlyUnlocked = <String>[];
-    
+
+    Future<void> unlockIf(bool condition, String badgeId) async {
+      if (condition && !isUnlocked(badgeId)) {
+        await unlockBadge(badgeId);
+        newlyUnlocked.add(badgeId);
+      }
+    }
+
     try {
-      final jogBox = Hive.box<JogRecord>('jog_records');
-      final records = jogBox.values.toList();
-      
-      if (records.isEmpty) return newlyUnlocked;
-
-      // 첫 플로깅 뱃지
-      if (!isUnlocked('first_plogging')) {
-        await unlockBadge('first_plogging');
-        newlyUnlocked.add('first_plogging');
-      }
-
-      // 거리 뱃지들
+      final records = Hive.box<JogRecord>('jog_records').values.toList();
+      final dates = records.map((r) => r.date).toList();
       final totalDistance = records.fold<double>(0, (sum, record) => sum + record.distanceKm);
-      
-      if (totalDistance >= 5 && !isUnlocked('distance_5km')) {
-        await unlockBadge('distance_5km');
-        newlyUnlocked.add('distance_5km');
-      }
-      
-      if (totalDistance >= 10 && !isUnlocked('distance_10km')) {
-        await unlockBadge('distance_10km');
-        newlyUnlocked.add('distance_10km');
-      }
-      
-      if (totalDistance >= 50 && !isUnlocked('distance_50km')) {
-        await unlockBadge('distance_50km');
-        newlyUnlocked.add('distance_50km');
-      }
+      final streak = maxConsecutiveDays(dates);
 
-      // 시간대 뱃지들
-      for (final record in records) {
-        final hour = record.date.hour;
-        
-        if (hour >= 6 && hour < 9 && !isUnlocked('morning_plogging')) {
-          await unlockBadge('morning_plogging');
-          newlyUnlocked.add('morning_plogging');
-        }
-        
-        if (hour >= 21 && hour < 24 && !isUnlocked('night_plogging')) {
-          await unlockBadge('night_plogging');
-          newlyUnlocked.add('night_plogging');
-        }
-      }
+      // 조깅 기록 기반 뱃지
+      await unlockIf(records.isNotEmpty, 'first_plogging');
+      await unlockIf(totalDistance >= 5, 'distance_5km');
+      await unlockIf(totalDistance >= 10, 'distance_10km');
+      await unlockIf(totalDistance >= 50, 'distance_50km');
+      await unlockIf(dates.any((d) => d.hour >= 6 && d.hour < 9), 'morning_plogging');
+      await unlockIf(dates.any((d) => d.hour >= 21), 'night_plogging');
+      await unlockIf(streak >= 7, 'streak_7');
+      await unlockIf(streak >= 30, 'streak_30');
+      await unlockIf(isPerfectWeek(dates, DateTime.now()), 'perfect_week');
 
-      // 연속 플로깅 뱃지들
-      final sortedRecords = records..sort((a, b) => a.date.compareTo(b.date));
-      int currentStreak = 1;
-      int maxStreak = 1;
-      
-      for (int i = 1; i < sortedRecords.length; i++) {
-        final prevDate = sortedRecords[i - 1].date;
-        final currDate = sortedRecords[i].date;
-        final daysDiff = currDate.difference(prevDate).inDays;
-        
-        if (daysDiff == 1) {
-          currentStreak++;
-          maxStreak = maxStreak < currentStreak ? currentStreak : maxStreak;
-        } else if (daysDiff > 1) {
-          currentStreak = 1;
-        }
-      }
-      
-      if (maxStreak >= 7 && !isUnlocked('streak_7')) {
-        await unlockBadge('streak_7');
-        newlyUnlocked.add('streak_7');
-      }
-      
-      if (maxStreak >= 30 && !isUnlocked('streak_30')) {
-        await unlockBadge('streak_30');
-        newlyUnlocked.add('streak_30');
-      }
+      // 쓰레기 수거·커뮤니티 뱃지
+      await unlockIf(trashCount >= 10, 'trash_10');
+      await unlockIf(trashCount >= 50, 'trash_50');
+      await unlockIf(trashCount >= 100, 'trash_100');
+      await unlockIf(postCount >= 5, 'community_share');
 
-      // 완벽한 한 주 뱃지
-      final now = DateTime.now();
-      final weekStart = now.subtract(Duration(days: now.weekday - 1));
-      final weekEnd = weekStart.add(const Duration(days: 6));
-      
-      final weekRecords = records.where((record) => 
-        record.date.isAfter(weekStart.subtract(const Duration(days: 1))) &&
-        record.date.isBefore(weekEnd.add(const Duration(days: 1)))
-      ).toList();
-      
-      final weekDays = weekRecords.map((r) => r.date.weekday).toSet();
-      if (weekDays.length >= 7 && !isUnlocked('perfect_week')) {
-        await unlockBadge('perfect_week');
-        newlyUnlocked.add('perfect_week');
-      }
+      // 날씨 뱃지
+      final weather = WeatherService.conditionFromCode(weatherCode);
+      await unlockIf(weather == WeatherCondition.rain, 'weather_rain');
+      await unlockIf(weather == WeatherCondition.snow, 'weather_snow');
 
       // 에코 마스터 뱃지 (기본 뱃지들 모두 획득 시)
-      final basicBadges = [
-        'first_plogging', 'distance_5km', 'trash_10', 'morning_plogging'
-      ];
-      
-      if (basicBadges.every((badge) => isUnlocked(badge)) && !isUnlocked('eco_master')) {
-        await unlockBadge('eco_master');
-        newlyUnlocked.add('eco_master');
-      }
-
+      await unlockIf(_basicBadges.every(isUnlocked), 'eco_master');
     } catch (e) {
-      print('뱃지 조건 체크 오류: $e');
+      debugPrint('뱃지 조건 체크 오류: $e');
     }
 
     return newlyUnlocked;
   }
+
+  /// 서로 다른 날짜 기준으로 가장 긴 연속 일수를 셉니다. (같은 날 여러 번은 하루로 계산)
+  static int maxConsecutiveDays(Iterable<DateTime> dates) {
+    final days = dates.map(_dayOf).toSet().toList()..sort();
+    if (days.isEmpty) return 0;
+    var best = 1;
+    var current = 1;
+    for (var i = 1; i < days.length; i++) {
+      if (days[i].difference(days[i - 1]).inDays == 1) {
+        current++;
+        if (current > best) best = current;
+      } else {
+        current = 1;
+      }
+    }
+    return best;
+  }
+
+  /// [now]가 속한 주(월~일)의 7일 모두 기록이 있는지 확인합니다.
+  static bool isPerfectWeek(Iterable<DateTime> dates, DateTime now) {
+    final monday = _dayOf(now).subtract(Duration(days: now.weekday - 1));
+    final daysThisWeek = dates
+        .map(_dayOf)
+        .where((d) => !d.isBefore(monday) && d.difference(monday).inDays < 7)
+        .toSet();
+    return daysThisWeek.length == 7;
+  }
+
+  // 시간대·서머타임 영향 없이 날짜만 비교하려고 UTC 자정으로 맞춥니다.
+  static DateTime _dayOf(DateTime d) => DateTime.utc(d.year, d.month, d.day);
 
   // 뱃지 데이터에 획득 상태 추가
   List<Map<String, dynamic>> getBadgesWithStatus() {
@@ -281,4 +284,4 @@ class BadgeService extends ChangeNotifier {
       'isUnlocked': isUnlocked(badge['id']),
     }).toList();
   }
-} 
+}

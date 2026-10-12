@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flogging_app/screens/community_write_screen.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../models/community_post.dart';
 import '../models/jog_record.dart';
+import '../models/user.dart';
 import '../services/badge_service.dart';
+import '../services/firebase_service.dart';
 import '../widgets/badge_unlock_popup.dart';
+import 'community_write_screen.dart';
 
 class CommunityScreen extends StatefulWidget {
-  const CommunityScreen({Key? key}) : super(key: key);
+  const CommunityScreen({super.key});
 
   @override
   State<CommunityScreen> createState() => _CommunityScreenState();
@@ -21,39 +24,25 @@ class _CommunityScreenState extends State<CommunityScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeBadgeService();
-  }
-
-  Future<void> _initializeBadgeService() async {
-    final badgeService = context.read<BadgeService>();
-    await badgeService.initialize();
-    await _checkBadgeConditions();
+    _checkBadgeConditions();
   }
 
   Future<void> _checkBadgeConditions() async {
-    final badgeService = context.read<BadgeService>();
-    final newlyUnlocked = await badgeService.checkBadgeConditions();
-    
-    if (newlyUnlocked.isNotEmpty && mounted) {
-      for (final badgeId in newlyUnlocked) {
-        final badge = badgeService.badges.firstWhere((b) => b['id'] == badgeId);
-        _showBadgeUnlockPopup(badge);
-      }
-    }
+    final newlyUnlocked = await context.read<BadgeService>().checkBadgeConditions();
+    if (!mounted) return;
+    await showBadgeUnlockPopups(context, newlyUnlocked);
   }
 
-  void _showBadgeUnlockPopup(Map<String, dynamic> badge) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => BadgeUnlockPopup(
-        badge: badge,
-        onClose: () {
-          Navigator.of(context).pop();
-          context.read<BadgeService>().clearNewlyUnlockedBadge();
-        },
-      ),
+  Future<void> _openWriteScreen() async {
+    final posted = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const CommunityWriteScreen()),
     );
+    if (posted != true || !mounted) return;
+
+    final newlyUnlocked = await context.read<BadgeService>().recordCommunityPost();
+    if (!mounted) return;
+    await showBadgeUnlockPopups(context, newlyUnlocked);
   }
 
   @override
@@ -105,6 +94,15 @@ class _CommunityScreenState extends State<CommunityScreen> {
           ),
         ],
       ),
+      floatingActionButton: _selectedTab == 2
+          ? FloatingActionButton.extended(
+              backgroundColor: Colors.lightGreen,
+              foregroundColor: Colors.white,
+              onPressed: _openWriteScreen,
+              icon: const Icon(Icons.edit),
+              label: const Text('글쓰기'),
+            )
+          : null,
     );
   }
 }
@@ -137,96 +135,154 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-class _RankTab extends StatelessWidget {
+class _RankTab extends StatefulWidget {
   const _RankTab();
+
+  @override
+  State<_RankTab> createState() => _RankTabState();
+}
+
+class _RankTabState extends State<_RankTab> {
+  final FirebaseService _firebaseService = FirebaseService();
+  late final Stream<List<PloggingUser>> _rankingStream = _firebaseService.rankingStream();
+
+  String _formatTotalTime(int seconds) {
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    return hours > 0 ? '$hours시간 $minutes분' : '$minutes분';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final distance = null;
-    final time = null;
-    final rankList = [];
-    return Padding(
+    final myUid = _firebaseService.currentUser?.uid;
+    return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      children: [
+        // 내 누적 기록 (기기에 저장된 조깅 기록 기준)
+        ValueListenableBuilder(
+          valueListenable: Hive.box<JogRecord>('jog_records').listenable(),
+          builder: (context, Box<JogRecord> box, _) {
+            final totalKm = box.values.fold<double>(0, (sum, r) => sum + r.distanceKm);
+            final totalSec = box.values.fold<int>(0, (sum, r) => sum + r.durationSeconds);
+            return Row(
+              children: [
+                Expanded(
+                  child: _InfoCard(
+                    label: 'Distance',
+                    value: '${totalKm.toStringAsFixed(1)} km',
+                    sub: '내 누적 거리',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _InfoCard(
+                    label: 'Time',
+                    value: _formatTotalTime(totalSec),
+                    sub: '내 누적 시간',
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: _InfoCard(
-                  label: 'Distance',
-                  value: distance ?? '-',
-                  sub: '현재 시각 기준',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _InfoCard(
-                  label: 'Time',
-                  value: time ?? '-',
-                  sub: '현재 시각 기준',
-                ),
+              const Text('Rank', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 4),
+              Text('누적 거리 순 · 함께 플로깅하는 사람들', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+              const SizedBox(height: 12),
+              StreamBuilder<List<PloggingUser>>(
+                stream: _rankingStream,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Text('랭킹을 불러오지 못했어요: ${snapshot.error}',
+                        style: TextStyle(color: Colors.grey[600]));
+                  }
+                  if (!snapshot.hasData) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator(color: Colors.lightGreen)),
+                    );
+                  }
+                  final rankList = snapshot.data!;
+                  if (rankList.isEmpty) {
+                    return Text('아직 랭킹 데이터가 없어요. 조깅을 기록하면 랭킹에 올라가요!',
+                        style: TextStyle(color: Colors.grey[600]));
+                  }
+                  return Column(
+                    children: List.generate(rankList.length, (i) {
+                      return _RankRow(rank: i + 1, user: rankList[i], isMe: rankList[i].id == myUid);
+                    }),
+                  );
+                },
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey[200]!),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+class _RankRow extends StatelessWidget {
+  final int rank;
+  final PloggingUser user;
+  final bool isMe;
+  const _RankRow({required this.rank, required this.user, required this.isMe});
+
+  static const List<Color> _medalColors = [Color(0xFFFFC107), Color(0xFFB0BEC5), Color(0xFFCD7F32)];
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = user.name.isNotEmpty ? user.name.characters.first : '?';
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.lightGreen.withValues(alpha: 0.12) : null,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 40,
+            child: Text(
+              '$rank${_rankSuffix(rank)}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: rank <= 3 ? _medalColors[rank - 1] : Colors.black87,
+              ),
             ),
+          ),
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.grey[300],
+            backgroundImage: user.profileImageUrl.isNotEmpty ? NetworkImage(user.profileImageUrl) : null,
+            child: user.profileImageUrl.isEmpty
+                ? Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                : null,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Rank', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 12),
-                if (rankList.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: const [
-                        Text('-', style: TextStyle(fontWeight: FontWeight.bold)),
-                        SizedBox(width: 10),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.grey,
-                          child: Icon(Icons.person, color: Colors.white),
-                        ),
-                        SizedBox(width: 10),
-                        Text('-', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  )
-                else ...List.generate(rankList.length, (i) {
-                  final user = rankList[i];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: [
-                        Text('${i + 1}${_rankSuffix(i + 1)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(width: 10),
-                        CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.grey[300],
-                          backgroundImage: user['img'] != null ? NetworkImage(user['img'] as String) : null,
-                          child: user['img'] == null ? const Icon(Icons.person, color: Colors.white) : null,
-                        ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(user['name'] ?? '-', style: const TextStyle(fontWeight: FontWeight.bold)),
-                            Text(user['email'] ?? '-', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  );
-                }),
+                Text(isMe ? '${user.name} (나)' : user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text('쓰레기 ${user.totalTrash}개 수거', style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ],
             ),
           ),
+          Text('${user.totalDistance.toStringAsFixed(1)} km', style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -234,9 +290,10 @@ class _RankTab extends StatelessWidget {
 }
 
 String _rankSuffix(int n) {
-  if (n == 1) return 'st';
-  if (n == 2) return 'nd';
-  if (n == 3) return 'rd';
+  if (n % 100 >= 11 && n % 100 <= 13) return 'th';
+  if (n % 10 == 1) return 'st';
+  if (n % 10 == 2) return 'nd';
+  if (n % 10 == 3) return 'rd';
   return 'th';
 }
 
@@ -276,7 +333,7 @@ class _BadgeTab extends StatelessWidget {
     return Consumer<BadgeService>(
       builder: (context, badgeService, child) {
         final badges = badgeService.getBadgesWithStatus();
-        
+
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Column(
@@ -291,7 +348,7 @@ class _BadgeTab extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                '플로깅을 통해 다양한 뱃지를 획득해보세요!',
+                '플로깅을 통해 다양한 뱃지를 획득해보세요! (${badgeService.unlockedBadges.length}/${badges.length})',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.grey[600],
@@ -323,7 +380,7 @@ class _BadgeTab extends StatelessWidget {
 
 class _BadgeCard extends StatelessWidget {
   final Map<String, dynamic> badge;
-  
+
   const _BadgeCard({required this.badge});
 
   @override
@@ -344,7 +401,7 @@ class _BadgeCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
               spreadRadius: 1,
               blurRadius: 6,
               offset: const Offset(0, 2),
@@ -361,7 +418,7 @@ class _BadgeCard extends StatelessWidget {
                   width: 60,
                   height: 60,
                   decoration: BoxDecoration(
-                    color: isUnlocked ? color.withOpacity(0.1) : Colors.grey[100],
+                    color: isUnlocked ? color.withValues(alpha: 0.1) : Colors.grey[100],
                     shape: BoxShape.circle,
                     border: Border.all(
                       color: isUnlocked ? color : Colors.grey[300]!,
@@ -446,7 +503,7 @@ class _BadgeCard extends StatelessWidget {
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: isUnlocked ? color.withOpacity(0.1) : Colors.grey[100],
+                color: isUnlocked ? color.withValues(alpha: 0.1) : Colors.grey[100],
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: isUnlocked ? color : Colors.grey[300]!,
@@ -508,7 +565,7 @@ class _BadgeCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: isUnlocked ? color.withOpacity(0.1) : Colors.grey[100],
+                color: isUnlocked ? color.withValues(alpha: 0.1) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
@@ -533,11 +590,18 @@ class _BadgeCard extends StatelessWidget {
   }
 }
 
-class _FeedTab extends StatelessWidget {
+class _FeedTab extends StatefulWidget {
   const _FeedTab();
-  
+
+  @override
+  State<_FeedTab> createState() => _FeedTabState();
+}
+
+class _FeedTabState extends State<_FeedTab> {
+  late final Stream<List<CommunityPost>> _postsStream = FirebaseService().postsStream();
+
   // 조깅에 도움이 되는 팁 데이터
-  final List<Map<String, dynamic>> _joggingTips = const [
+  static const List<Map<String, dynamic>> _joggingTips = [
     {
       'title': '처음 조깅을 시작하는 분들을 위한 기본 가이드',
       'content': '초보자를 위한 조깅 가이드',
@@ -569,68 +633,162 @@ class _FeedTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
+      children: [
+        // 조깅 팁 섹션
+        _FeedSectionTitle(icon: Icons.lightbulb, title: '조깅 팁', color: Colors.orange[600]!),
+        // 조깅 팁 가로 스크롤
+        SizedBox(
+          height: 220,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: _joggingTips.length,
+            itemBuilder: (context, idx) {
+              final tip = _joggingTips[idx];
+              return Container(
+                width: 200,
+                margin: const EdgeInsets.only(right: 16),
+                child: _JoggingTipCard(tip: tip),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        // 커뮤니티 글
+        _FeedSectionTitle(icon: Icons.forum, title: '커뮤니티 글', color: Colors.teal[600]!),
+        StreamBuilder<List<CommunityPost>>(
+          stream: _postsStream,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return _FeedMessage(text: '글을 불러오지 못했어요: ${snapshot.error}');
+            }
+            if (!snapshot.hasData) {
+              return const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator(color: Colors.lightGreen)),
+              );
+            }
+            final posts = snapshot.data!;
+            if (posts.isEmpty) {
+              return const _FeedMessage(text: '아직 글이 없어요. 오른쪽 아래 글쓰기 버튼으로 첫 글을 남겨보세요!');
+            }
+            return Column(children: posts.map((post) => _PostCard(post: post)).toList());
+          },
+        ),
+        const SizedBox(height: 16),
+        // 내 조깅 기록 (이 기기에 저장된 기록)
+        _FeedSectionTitle(icon: Icons.history, title: '내 조깅 기록', color: Colors.green[600]!),
+        const _JoggingHistoryList(),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+}
+
+class _FeedSectionTitle extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Color color;
+  const _FeedSectionTitle({required this.icon, required this.title, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Row(
         children: [
-          // 조깅 팁 섹션
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(Icons.lightbulb, color: Colors.orange[600], size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  '조깅 팁',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orange[600],
-                  ),
-                ),
-              ],
+          Icon(icon, color: color, size: 24),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
             ),
-          ),
-          // 조깅 팁 가로 스크롤
-          SizedBox(
-            height: 220,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: _joggingTips.length,
-              itemBuilder: (context, idx) {
-                final tip = _joggingTips[idx];
-                return Container(
-                  width: 200,
-                  margin: const EdgeInsets.only(right: 16),
-                  child: _JoggingTipCard(tip: tip),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-          // 모든 조깅 기록 섹션
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(Icons.history, color: Colors.green[600], size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  '모든 조깅 기록',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // 조깅 기록 목록
-          Expanded(
-            child: _JoggingHistoryList(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FeedMessage extends StatelessWidget {
+  final String text;
+  const _FeedMessage({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text, style: TextStyle(color: Colors.grey[600]), textAlign: TextAlign.center),
+    );
+  }
+}
+
+class _PostCard extends StatelessWidget {
+  final CommunityPost post;
+  const _PostCard({required this.post});
+
+  String _formatDate(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 1) return '방금 전';
+    if (diff.inHours < 1) return '${diff.inMinutes}분 전';
+    if (diff.inDays < 1) return '${diff.inHours}시간 전';
+    return '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: Colors.lightGreen,
+                  child: Text(
+                    post.authorName.isNotEmpty ? post.authorName.characters.first : '?',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(post.authorName, style: const TextStyle(fontWeight: FontWeight.w600))),
+                Text(_formatDate(post.createdAt), style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(post.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(post.content, style: const TextStyle(fontSize: 14, height: 1.4)),
+            if (post.imageUrl.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  post.imageUrl,
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -643,16 +801,12 @@ class _JoggingHistoryList extends StatelessWidget {
     if (seconds == 0) return '0분';
     final hours = seconds ~/ 3600;
     final minutes = (seconds % 3600) ~/ 60;
-    
-    if (hours > 0) {
-      return '${hours}시간 ${minutes}분';
-    } else {
-      return '${minutes}분';
-    }
-  }
 
-  String _formatDate(DateTime date) {
-    return '${date.year}.${date.month.toString().padLeft(2, '0')}.${date.day.toString().padLeft(2, '0')}';
+    if (hours > 0) {
+      return '$hours시간 $minutes분';
+    } else {
+      return '$minutes분';
+    }
   }
 
   @override
@@ -661,11 +815,11 @@ class _JoggingHistoryList extends StatelessWidget {
       valueListenable: Hive.box<JogRecord>('jog_records').listenable(),
       builder: (context, Box<JogRecord> box, _) {
         final records = box.values.toList().reversed.toList();
-        
+
         if (records.isEmpty) {
-          return Center(
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.directions_run,
@@ -693,10 +847,8 @@ class _JoggingHistoryList extends StatelessWidget {
           );
         }
 
-        return ListView.builder(
-          itemCount: records.length,
-          itemBuilder: (context, index) {
-            final record = records[index];
+        return Column(
+          children: records.map((record) {
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               shape: RoundedRectangleBorder(
@@ -718,7 +870,7 @@ class _JoggingHistoryList extends StatelessWidget {
                       child: Column(
                         children: [
                           Text(
-                            _formatDate(record.date).split('.')[1], // 월
+                            record.date.month.toString().padLeft(2, '0'), // 월
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.green[700],
@@ -726,7 +878,7 @@ class _JoggingHistoryList extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            _formatDate(record.date).split('.')[2], // 일
+                            record.date.day.toString().padLeft(2, '0'), // 일
                             style: TextStyle(
                               fontSize: 18,
                               color: Colors.green[700],
@@ -775,15 +927,8 @@ class _JoggingHistoryList extends StatelessWidget {
                     ),
                     // 공유 버튼
                     IconButton(
-                      onPressed: () {
-                        // 공유 기능 (share_plus 패키지 필요)
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${_formatDate(record.date)} 조깅 기록을 공유합니다'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      },
+                      onPressed: () => Share.share(record.toShareText()),
+                      tooltip: '공유',
                       icon: Icon(
                         Icons.share,
                         color: Colors.grey[600],
@@ -794,7 +939,7 @@ class _JoggingHistoryList extends StatelessWidget {
                 ),
               ),
             );
-          },
+          }).toList(),
         );
       },
     );
@@ -825,7 +970,7 @@ class _JoggingHistoryList extends StatelessWidget {
 
 class _JoggingTipCard extends StatelessWidget {
   final Map<String, dynamic> tip;
-  
+
   const _JoggingTipCard({required this.tip});
 
   @override
@@ -874,14 +1019,14 @@ class _JoggingTipCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.7),
+                          color: Colors.black.withValues(alpha: 0.7),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(
-                              tip['type'] == 'video' ? Icons.play_arrow : 
+                              tip['type'] == 'video' ? Icons.play_arrow :
                               tip['type'] == 'playlist' ? Icons.music_note : Icons.article,
                               color: Colors.white,
                               size: 12,
@@ -949,13 +1094,20 @@ class _JoggingTipCard extends StatelessWidget {
 
 class _TipDetailSheet extends StatelessWidget {
   final Map<String, dynamic> tip;
-  
+
   const _TipDetailSheet({required this.tip});
 
-  Future<void> _launchUrl(String url) async {
-    final Uri uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+  Future<void> _launchUrl(BuildContext context, String url) async {
+    var opened = false;
+    try {
+      opened = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (e) {
+      debugPrint('링크 열기 실패: $e');
+    }
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('영상을 열 수 없습니다.')),
+      );
     }
   }
 
@@ -985,17 +1137,19 @@ class _TipDetailSheet extends StatelessWidget {
             child: Row(
               children: [
                 Icon(
-                  tip['type'] == 'video' ? Icons.play_circle : 
+                  tip['type'] == 'video' ? Icons.play_circle :
                   tip['type'] == 'playlist' ? Icons.music_note : Icons.article,
                   color: Colors.green,
                   size: 24,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  tip['title'],
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Text(
+                    tip['title'],
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -1048,14 +1202,14 @@ class _TipDetailSheet extends StatelessWidget {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          _launchUrl(tip['videoUrl']);
+                          _launchUrl(context, tip['videoUrl']);
                         },
                         icon: Icon(
-                          tip['type'] == 'video' ? Icons.play_arrow : 
+                          tip['type'] == 'video' ? Icons.play_arrow :
                           tip['type'] == 'playlist' ? Icons.music_note : Icons.open_in_new,
                         ),
                         label: Text(
-                          tip['type'] == 'video' ? '영상 보기' : 
+                          tip['type'] == 'video' ? '영상 보기' :
                           tip['type'] == 'playlist' ? '플레이리스트 듣기' : '자세히 보기',
                         ),
                         style: ElevatedButton.styleFrom(
@@ -1073,4 +1227,4 @@ class _TipDetailSheet extends StatelessWidget {
       ),
     );
   }
-} 
+}

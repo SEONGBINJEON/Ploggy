@@ -1,8 +1,11 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/diary_entry.dart';
+import '../services/firebase_service.dart';
+import '../widgets/photo_picker_field.dart';
 
 class PloggingDiaryWriteScreen extends StatefulWidget {
-  const PloggingDiaryWriteScreen({Key? key}) : super(key: key);
+  const PloggingDiaryWriteScreen({super.key});
 
   @override
   State<PloggingDiaryWriteScreen> createState() => _PloggingDiaryWriteScreenState();
@@ -10,21 +13,64 @@ class PloggingDiaryWriteScreen extends StatefulWidget {
 
 class _PloggingDiaryWriteScreenState extends State<PloggingDiaryWriteScreen> {
   final _formKey = GlobalKey<FormState>();
+  final FirebaseService _firebaseService = FirebaseService();
   String? _title, _distance, _time, _steps, _memo;
+  Uint8List? _imageBytes;
   bool _isSaving = false;
 
   Future<void> _saveDiary() async {
+    final user = _firebaseService.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인이 필요합니다.')),
+      );
+      return;
+    }
+
     setState(() { _isSaving = true; });
-    await FirebaseFirestore.instance.collection('plogging_diary').add({
-      'title': _title,
-      'distance': _distance,
-      'time': _time,
-      'steps': _steps,
-      'memo': _memo,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-    setState(() { _isSaving = false; });
-    Navigator.pop(context);
+    try {
+      // 사진 업로드에 실패해도 일기는 저장합니다.
+      final imageBytes = _imageBytes;
+      final imageUrl = imageBytes == null
+          ? ''
+          : await _firebaseService.tryUploadSharedImage(imageBytes, 'diary_images') ?? '';
+      final photoFailed = imageBytes != null && imageUrl.isEmpty;
+
+      final synced = await _firebaseService.saveDiaryEntry(DiaryEntry(
+        userId: user.uid,
+        title: _title!.trim(),
+        distanceKm: double.tryParse(_distance?.trim() ?? ''),
+        time: _time?.trim() ?? '',
+        steps: int.tryParse(_steps?.trim() ?? ''),
+        memo: _memo?.trim() ?? '',
+        imageUrl: imageUrl,
+        createdAt: DateTime.now(),
+      ));
+      if (!mounted) return;
+      final notices = [
+        if (!synced) '오프라인이라 기기에 먼저 저장했어요. 연결되면 자동으로 올라가요.',
+        if (photoFailed) '사진은 올리지 못해서 일기만 저장했어요.',
+      ];
+      if (notices.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(notices.join('\n'))),
+        );
+      }
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _isSaving = false; });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('저장 실패: $e')),
+      );
+    }
+  }
+
+  String? _validateNumber(String? value, {bool integer = false}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final ok = integer ? int.tryParse(text) != null : double.tryParse(text) != null;
+    return ok ? null : '숫자로 입력해주세요';
   }
 
   @override
@@ -46,25 +92,20 @@ class _PloggingDiaryWriteScreenState extends State<PloggingDiaryWriteScreen> {
               TextFormField(
                 decoration: const InputDecoration(labelText: '제목', fillColor: Colors.white, filled: true),
                 onSaved: (v) => _title = v,
-                validator: (v) => v == null || v.isEmpty ? '제목을 입력하세요' : null,
+                validator: (v) => v == null || v.trim().isEmpty ? '제목을 입력하세요' : null,
               ),
               const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.lightGreen,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: const Text('사진 추가'),
+              PhotoPickerField(
+                imageBytes: _imageBytes,
+                enabled: !_isSaving,
+                onChanged: (bytes) => setState(() => _imageBytes = bytes),
               ),
               const SizedBox(height: 16),
               TextFormField(
                 decoration: const InputDecoration(labelText: '거리 (km)', fillColor: Colors.white, filled: true),
-                keyboardType: TextInputType.number,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 onSaved: (v) => _distance = v,
+                validator: (v) => _validateNumber(v),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -76,6 +117,7 @@ class _PloggingDiaryWriteScreenState extends State<PloggingDiaryWriteScreen> {
                 decoration: const InputDecoration(labelText: '스텝 수', fillColor: Colors.white, filled: true),
                 keyboardType: TextInputType.number,
                 onSaved: (v) => _steps = v,
+                validator: (v) => _validateNumber(v, integer: true),
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -109,4 +151,4 @@ class _PloggingDiaryWriteScreenState extends State<PloggingDiaryWriteScreen> {
       ),
     );
   }
-} 
+}

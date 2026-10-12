@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Ploggy Firestore 보안 규칙
+// 배포: Firebase 콘솔 > Firestore Database > 규칙 에 붙여넣기, 또는 `firebase deploy --only firestore:rules`
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // 사용자 프로필: 본인만 (예전 버전 문서에는 이메일이 들어 있음)
+    match /users/{uid} {
+      allow read, create, update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // 랭킹용 공개 기록(이름·누적 거리·시간·수거 개수): 로그인한 사용자는 모두 읽기, 쓰기는 본인만
+    match /leaderboard/{uid} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(uid);
+      allow delete: if false;
+    }
+
+    // 쓰레기 분류 기록: 본인만
+    match /trash_records/{recordId} {
+      allow read, delete: if isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+      allow update: if false;
+    }
+
+    // 플로깅 다이어리: 본인만
+    match /plogging_diary/{entryId} {
+      allow read, update, delete: if isOwner(resource.data.userId);
+      allow create: if isOwner(request.resource.data.userId);
+    }
+
+    // 커뮤니티 글: 로그인한 사용자는 모두 읽기, 작성·수정·삭제는 본인 글만
+    match /community_posts/{postId} {
+      allow read: if signedIn();
+      allow create: if isOwner(request.resource.data.userId);
+      allow update, delete: if isOwner(resource.data.userId);
+    }
+  }
+}

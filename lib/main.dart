@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:provider/provider.dart';
+import 'app_navigation.dart';
 import 'firebase_options.dart';
 import 'models/jog_record.dart';
 import 'screens/home_screen.dart';
@@ -14,33 +15,33 @@ import 'screens/login_screen.dart';
 import 'services/auth_provider.dart';
 import 'services/badge_service.dart';
 
-final ValueNotifier<int> tabIndexNotifier = ValueNotifier<int>(0);
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Hive 초기화
   await Hive.initFlutter();
   Hive.registerAdapter(JogRecordAdapter());
   await Hive.openBox<JogRecord>('jog_records');
-  
-  // Firebase 초기화 - 중복 방지
+
+  await _initializeFirebase();
+
+  runApp(const PloggingApp());
+}
+
+// Android는 google-services.json, 웹은 firebase_options.dart 설정으로 초기화합니다.
+// 네이티브 설정을 쓸 수 없는 환경이면 웹 설정으로 한 번 더 시도합니다.
+Future<void> _initializeFirebase() async {
+  if (Firebase.apps.isNotEmpty) return;
   try {
-    if (Firebase.apps.isEmpty) {
-      await Firebase.initializeApp(options: firebaseOptions);
-      print('Firebase 초기화 성공');
-    } else {
-      print('Firebase가 이미 초기화되어 있습니다.');
-    }
+    await Firebase.initializeApp(options: kIsWeb ? firebaseOptions : null);
   } catch (e) {
-    print('Firebase 초기화 오류: $e');
-    // 기존 앱이 있으면 그것을 사용
-    if (Firebase.apps.isNotEmpty) {
-      print('기존 Firebase 앱을 사용합니다.');
+    debugPrint('Firebase 기본 설정 초기화 실패, 웹 설정으로 재시도: $e');
+    try {
+      await Firebase.initializeApp(options: firebaseOptions);
+    } catch (e) {
+      debugPrint('Firebase 초기화 오류: $e');
     }
   }
-  
-  runApp(const PloggingApp());
 }
 
 class PloggingApp extends StatelessWidget {
@@ -50,7 +51,7 @@ class PloggingApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => BadgeService()),
+        ChangeNotifierProvider(create: (_) => BadgeService()..initialize()),
       ],
       child: MaterialApp(
         title: 'Plogging',
@@ -66,7 +67,7 @@ class PloggingApp extends StatelessWidget {
 }
 
 class AuthWrapper extends StatelessWidget {
-  const AuthWrapper({Key? key}) : super(key: key);
+  const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +80,7 @@ class AuthWrapper extends StatelessWidget {
             ),
           );
         }
-        
+
         if (authProvider.isAuthenticated) {
           return const MainTabNavigator();
         } else {
@@ -91,13 +92,16 @@ class AuthWrapper extends StatelessWidget {
 }
 
 class MainTabNavigator extends StatefulWidget {
-  const MainTabNavigator({Key? key}) : super(key: key);
+  const MainTabNavigator({super.key});
   @override
   State<MainTabNavigator> createState() => _MainTabNavigatorState();
 }
 
 class _MainTabNavigatorState extends State<MainTabNavigator> {
   int _selectedIndex = 0;
+  // 한 번 열어 본 탭만 만들고, 그 뒤로는 상태를 유지합니다.
+  // (조깅 중에 쓰레기 탭으로 가서 사진을 찍어도 조깅 기록이 끊기지 않도록)
+  final Set<int> _visitedTabs = {0};
   final List<Widget> _screens = const [
     HomeScreen(),
     PloggingDiaryScreen(),
@@ -109,6 +113,8 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
   @override
   void initState() {
     super.initState();
+    _selectedIndex = tabIndexNotifier.value;
+    _visitedTabs.add(_selectedIndex);
     tabIndexNotifier.addListener(_onTabChanged);
   }
 
@@ -121,6 +127,7 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
   void _onTabChanged() {
     setState(() {
       _selectedIndex = tabIndexNotifier.value;
+      _visitedTabs.add(_selectedIndex);
     });
   }
 
@@ -131,7 +138,13 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [
+          for (var i = 0; i < _screens.length; i++)
+            _visitedTabs.contains(i) ? _screens[i] : const SizedBox.shrink(),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.white,

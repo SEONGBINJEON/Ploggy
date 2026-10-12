@@ -1,9 +1,12 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'classification_result.dart';
 
+/// 웹에서는 tflite_flutter가 동작하지 않으므로, 화면 흐름 확인용 예시 결과를 돌려줍니다.
+/// 결과에 isDemo가 표시되어 화면에서 실제 AI 결과가 아니라는 안내를 보여줍니다.
 class TrashClassificationService {
-  List<String> _labels = ['glass', 'metal', 'organics', 'paper', 'plastic', 'trash'];
-  final Map<String, String> _disposalMap = const {
+  static const List<String> _labels = ['glass', 'metal', 'organics', 'paper', 'plastic', 'trash'];
+  static const Map<String, String> _disposalMap = {
     'organics': 'COMPOST',
     'trash': 'LANDFILL',
     'glass': 'RECYCLING',
@@ -11,56 +14,29 @@ class TrashClassificationService {
     'paper': 'RECYCLING',
     'plastic': 'RECYCLING',
   };
-  bool _isInitialized = false;
+  final math.Random _random = math.Random();
 
   static final TrashClassificationService _instance = TrashClassificationService._internal();
   factory TrashClassificationService() => _instance;
   TrashClassificationService._internal();
 
-  Future<void> initialize() async {
-    if (_isInitialized) return;
-    _isInitialized = true;
-  }
+  Future<void> initialize() async {}
 
   Future<TrashClassificationResult> classifyImage(Uint8List imageBytes) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-    final rnd = math.Random();
-    final label = _labels[rnd.nextInt(_labels.length)];
-    final confidence = 0.7 + rnd.nextDouble() * 0.25;
-    final all = _labels
-        .map((l) => ClassificationResult(
-              label: l,
-              confidence: rnd.nextDouble(),
-              disposalType: _disposalMap[l] ?? 'UNKNOWN',
-            ))
-        .toList()
-      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    final raw = List.generate(_labels.length, (_) => _random.nextDouble());
+    final sum = raw.fold(0.0, (a, b) => a + b);
+    final results = List.generate(_labels.length, (i) {
+      return ClassificationResult(
+        label: _labels[i],
+        confidence: raw[i] / sum,
+        disposalType: _disposalMap[_labels[i]] ?? 'UNKNOWN',
+      );
+    })..sort((a, b) => b.confidence.compareTo(a.confidence));
 
     return TrashClassificationResult(
-      topResult: ClassificationResult(
-        label: label,
-        confidence: confidence,
-        disposalType: _disposalMap[label] ?? 'UNKNOWN',
-      ),
-      allResults: all,
+      topResult: results.first,
+      allResults: results,
+      isDemo: true,
     );
   }
 }
-
-class ClassificationResult {
-  final String label;
-  final double confidence;
-  final String disposalType;
-  ClassificationResult({required this.label, required this.confidence, required this.disposalType});
-  String get confidencePercentage => '${(confidence * 100).toStringAsFixed(1)}%';
-}
-
-class TrashClassificationResult {
-  final ClassificationResult topResult;
-  final List<ClassificationResult> allResults;
-  TrashClassificationResult({required this.topResult, required this.allResults});
-}
-
-

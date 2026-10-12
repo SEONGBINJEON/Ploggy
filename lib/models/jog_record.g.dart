@@ -21,13 +21,14 @@ class JogRecordAdapter extends TypeAdapter<JogRecord> {
       distanceKm: fields[1] as double,
       durationSeconds: fields[2] as int,
       speedKmph: fields[3] as double,
+      routeLatLng: fields[4] == null ? [] : (fields[4] as List).cast<double>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, JogRecord obj) {
     writer
-      ..writeByte(4)
+      ..writeByte(5)
       ..writeByte(0)
       ..write(obj.date)
       ..writeByte(1)
@@ -35,7 +36,9 @@ class JogRecordAdapter extends TypeAdapter<JogRecord> {
       ..writeByte(2)
       ..write(obj.durationSeconds)
       ..writeByte(3)
-      ..write(obj.speedKmph);
+      ..write(obj.speedKmph)
+      ..writeByte(4)
+      ..write(obj.routeLatLng);
   }
 
   @override

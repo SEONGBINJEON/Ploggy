@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import '../widgets/trash_classifier.dart';
 
 class TrashCameraScreen extends StatelessWidget {
-  const TrashCameraScreen({Key? key}) : super(key: key);
+  const TrashCameraScreen({super.key});
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: Colors.white,
-      body: TrashClassifier(),
+      body: SafeArea(child: TrashClassifier()),
     );
   }
-} 
+}

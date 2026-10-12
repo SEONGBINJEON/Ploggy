@@ -7,16 +7,19 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
+    <!-- ✅ 조깅 중 카메라를 열거나 화면을 꺼도 위치 기록이 이어지도록 (포그라운드 서비스, Android 14+는 LOCATION 타입 필요) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <application
         android:label="flogging_app"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
-        <!-- ✅ Google Maps API Key -->
+        <!-- ✅ Google Maps API Key: android/local.properties의 MAPS_API_KEY 값이 빌드할 때 들어갑니다 (깃에 올리지 않음) -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_GOOGLE_MAPS_API_KEY" />
+            android:value="${MAPS_API_KEY}" />
 
         <!-- ✅ Flutter 런처 액티비티 -->
         <activity
@@ -50,6 +53,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <!-- ✅ Android 11+에서 조깅 팁 영상(유튜브) 링크를 열 수 있는지 확인하려면 필요 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
         </intent>
     </queries>
 </manifest>
